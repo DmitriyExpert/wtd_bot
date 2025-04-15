@@ -3,6 +3,7 @@ import config
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.filters import CommandStart, Command
+import requests
 
 
 bot = Bot(token=config.TG_API_TOKEN)
