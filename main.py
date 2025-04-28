@@ -1,25 +1,17 @@
 import asyncio
 import config
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
-from aiogram.filters import CommandStart, Command
+from aiogram import Bot, Dispatcher
+from app.handlers import router
+from app.database.models import async_main
 
 
-bot = Bot(token=config.TG_API_TOKEN)
-dp = Dispatcher()
-
-
-@dp.message(CommandStart())
-async def cmd_start(message: Message):
-    await message.answer("Привет!")
-
-
-@dp.message(Command("help"))
-async def cmd_help(message: Message):
-    await message.answer("Вы нажали help")
 
 
 async def main():
+    await async_main()
+    bot = Bot(token=config.TG_API_TOKEN)
+    dp = Dispatcher()
+    dp.include_router(router)
     await dp.start_polling(bot)
 
 
