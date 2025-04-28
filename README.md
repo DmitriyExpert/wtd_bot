@@ -5,3 +5,7 @@
 
 Установка зависимостей
 pip install -r requirements.txt
+
+Добавляем файл config.py в корень проекта -> Создаем внутри переменную TG_API_TOKEN = 'Ваш id токен'
+
+Запуск бота через терминал -> python main.py
