@@ -7,6 +7,7 @@ from sqlalchemy import (
     Text,
     SmallInteger,
     DATETIME,
+    Enum
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -14,6 +15,7 @@ from sqlalchemy.orm import (
     mapped_column,
     sessionmaker,
     relationship,
+    selectinload
 )
 from sqlalchemy.ext.asyncio import AsyncAttrs, create_async_engine, AsyncSession
 import datetime
@@ -61,6 +63,7 @@ class User(Base):
     role: Mapped[int] = mapped_column(ForeignKey("app_roles.id"))
     delete_date: Mapped[datetime.datetime] = mapped_column(DATETIME, nullable=True)
     user_logged: Mapped[SmallInteger] = mapped_column(SmallInteger, default=0)
+    
     app_role: Mapped["AppRole"] = relationship(back_populates="users")
     projects: Mapped[list["Project"]] = relationship(back_populates="admin")
     tasks_created: Mapped[list["Task"]] = relationship(
@@ -70,10 +73,16 @@ class User(Base):
         foreign_keys="[Task.user_id]", back_populates="assignee"
     )
     comments: Mapped[list["TasksComment"]] = relationship(back_populates="user")
-    project_users: Mapped[list["ProjectsUser"]] = relationship(back_populates="user")
+    project_users: Mapped[list["ProjectsUsers"]] = relationship(back_populates="user")
     invitations_received: Mapped[list["Invitation"]] = relationship(back_populates="invited_user", foreign_keys="[Invitation.user_id]")
     invitations_sent: Mapped[list["Invitation"]] = relationship(back_populates="sender", foreign_keys="[Invitation.sender_id]")
-    project_activity: Mapped["ProjectActivity"] = relationship(back_populates="user", uselist=False) #one to one
+    project_activity: Mapped["ProjectActivity"] = relationship(back_populates="user", uselist=False)
+    project_applications: Mapped[list["ProjectApplication"]] = relationship(back_populates="user")
+    banned_projects: Mapped[list["ProjectsUsers"]] = relationship(
+        back_populates="user",
+        primaryjoin="and_(User.id == ProjectsUsers.user_id, ProjectsUsers.ban.isnot(None))",
+        viewonly=True
+    )
 
 
 class Project(Base):
@@ -89,9 +98,10 @@ class Project(Base):
 
     admin: Mapped["User"] = relationship(back_populates="projects")
     tasks: Mapped[list["Task"]] = relationship(back_populates="project")
-    project_users: Mapped[list["ProjectsUser"]] = relationship(back_populates="project")
+    project_users: Mapped[list["ProjectsUsers"]] = relationship(back_populates="project")
     project_activities: Mapped[list["ProjectActivity"]] = relationship(back_populates="project")
     invitations: Mapped[list["Invitation"]] = relationship(back_populates="project")
+    project_applications: Mapped[list["ProjectApplication"]] = relationship(back_populates="project")
 
 
 class Invitation(Base):
@@ -113,28 +123,31 @@ class ProjectsRole(Base):
     __tablename__ = "projects_roles"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_role_name: Mapped[str] = mapped_column(String(45), unique=True)
-    project_users: Mapped[list["ProjectsUser"]] = relationship(
+    project_users: Mapped[list["ProjectsUsers"]] = relationship(
         back_populates="project_role"
     )
 
 
-class ProjectsUser(Base):
+class ProjectsUsers(Base):
     __tablename__ = "projects_users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    role_project: Mapped[int] = mapped_column(ForeignKey("projects_roles.id"))
+    role_project: Mapped[int] = mapped_column(ForeignKey("projects_roles.id"), default=1)
     join_date: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP, default=datetime.datetime.utcnow
     )
     exit_date: Mapped[datetime.datetime] = mapped_column(DATETIME, nullable=True)
-
+    ban: Mapped[int] = mapped_column(ForeignKey("ban.id"), nullable=True)
+    ban_description: Mapped[Text] = mapped_column(Text, nullable=True)
+    user: Mapped["User"] = relationship(back_populates="project_users", lazy="selectin")
+    ban_info: Mapped["Ban"] = relationship(back_populates="banned_projects_users")
     project: Mapped["Project"] = relationship(back_populates="project_users")
-    user: Mapped["User"] = relationship(back_populates="project_users")
     project_role: Mapped["ProjectsRole"] = relationship(back_populates="project_users")
 
 
-class TasksStatut(Base):
+
+class TasksStatus(Base):
     __tablename__ = "tasks_statuts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     status_name: Mapped[str] = mapped_column(String(50), unique=True)
@@ -172,9 +185,9 @@ class Task(Base):
         foreign_keys=[creator_id], back_populates="tasks_created"
     )
     assignee: Mapped["User"] = relationship(
-        foreign_keys=[user_id], back_populates="tasks_assigned"
+        foreign_keys=[user_id], back_populates="tasks_assigned", lazy="selectin"
     )
-    status: Mapped["TasksStatut"] = relationship(back_populates="tasks")
+    status: Mapped["TasksStatus"] = relationship(back_populates="tasks")
     priority_obj: Mapped["TasksPriority"] = relationship(back_populates="tasks")
     comments: Mapped[list["TasksComment"]] = relationship(back_populates="task")
 
@@ -203,3 +216,24 @@ class ProjectActivity(Base):
 
     user: Mapped["User"] = relationship(back_populates="project_activity", uselist=False)
     project: Mapped["Project"] = relationship(back_populates="project_activities")
+
+
+class ProjectApplication(Base):
+    __tablename__ = "project_applications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"))
+    application_date: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP, default=datetime.datetime.utcnow
+    )
+    status: Mapped[str] = mapped_column(Enum("Pending", "Accepted", "Rejected"), default="Pending")
+
+    user: Mapped["User"] = relationship(back_populates="project_applications")
+    project: Mapped["Project"] = relationship(back_populates="project_applications")
+
+
+class Ban(Base):
+    __tablename__ = "ban"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ban_type: Mapped[str] = mapped_column(String(45))
+    banned_projects_users: Mapped[list["ProjectsUsers"]] = relationship(back_populates="ban_info")
